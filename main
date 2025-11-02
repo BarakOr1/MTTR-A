@@ -9,6 +9,20 @@ from langgraph.graph import StateGraph, START, END
 from langchain_community.chat_models import ChatOpenAI
 from langchain_core.messages import HumanMessage
 
+# === VISUAL STYLE SETTINGS ===
+plt.style.use("seaborn-v0_8-whitegrid")
+sns.set_palette(["#4169E1", "#9370DB", "#000000", "#FFFFFF"])  # royal blue, purple, black, white
+sns.set_context("talk", font_scale=0.9)
+plt.rcParams["figure.facecolor"] = "white"
+plt.rcParams["axes.facecolor"] = "white"
+plt.rcParams["axes.edgecolor"] = "#000000"
+plt.rcParams["grid.color"] = "#D3D3D3"
+plt.rcParams["grid.alpha"] = 0.6
+plt.rcParams["axes.labelcolor"] = "#000000"
+plt.rcParams["xtick.color"] = "#000000"
+plt.rcParams["ytick.color"] = "#000000"
+
+
 os.environ["OPENAI_API_KEY"] = "sk-proj-xxxxx"  # your key 
 random.seed(42)
 
@@ -76,6 +90,8 @@ QUERY_POOL = [
   "global memory reconciliation", "safe mode fallback routes",
   "retrieval reranking grounding", "planning decomposition tools"
 ]
+
+
 
 LOGDIR = pathlib.Path("telemetry"); LOGDIR.mkdir(exist_ok=True)
 LOGFILE = LOGDIR / f"langgraph_run_{int(time.time())}.jsonl"
@@ -228,34 +244,106 @@ else:
 
 # OPTIONAL PLOTS
 plt.figure(figsize=(7,4))
-sns.histplot(valid, bins=25, color="royalblue", kde=True)
-plt.title("MTTR-A Distribution (LangGraph MAS)")
-plt.xlabel("Recovery Time (s)"); plt.ylabel("Runs"); plt.grid(alpha=.3); plt.show()
-
-plt.figure(figsize=(7,4))
-sns.boxplot(data=df[df.recovery_mode != "no-drift"], x="recovery_mode", y="delay_sec", palette="Set2")
-plt.title("MTTR-A by Recovery Mode"); plt.xlabel("Mode"); plt.ylabel("Delay (s)")
-plt.grid(axis="y", alpha=.3); plt.show()
-
-print(f"\n Telemetry log saved to: {LOGFILE}")
-
-
-df["window_avg"] = df["delay_sec"].rolling(20).mean()
-plt.plot(df["window_avg"], label="Rolling MTTR-A (20-run)")
-plt.axhline(df.delay_sec.median(), color='r', ls='--', label='Median')
-plt.title("Rolling MTTR-A across 200 Runs")
-plt.xlabel("Run #"); plt.ylabel("Seconds"); plt.legend(); plt.grid(alpha=.3)
+sns.histplot(valid, bins=25, color="#4169E1", kde=True)
+plt.title("MTTR-A Distribution", color="#000000")
+plt.xlabel("Recovery Time (s)"); plt.ylabel("Runs")
+plt.grid(alpha=0.4, color="#9370DB")
 plt.show()
 
 
-sns.countplot(data=df[df.recovery_mode!="no-drift"], x="recovery_mode", palette="Set2")
-plt.title("Frequency of Recovery Modes")
-plt.ylabel("Count"); plt.grid(axis="y", alpha=.3)
+plt.figure(figsize=(7,4))
+sns.boxplot(data=df[df.recovery_mode != "no-drift"],
+            x="recovery_mode", y="delay_sec",
+            palette=["#4169E1","#9370DB","#000000","#808080"])
+plt.title("MTTR-A by Recovery Mode", color="#000000")
+plt.xlabel("Recovery Mode"); plt.ylabel("Delay (s)")
+plt.grid(axis="y", alpha=0.4, color="#9370DB")
+plt.show()
+
+# Compute rolling 20-run average (for stability plot)
+df["window_avg"] = df["delay_sec"].rolling(20, min_periods=1).mean()
+
+plt.figure(figsize=(7,4))
+plt.plot(df["window_avg"], label="Rolling MTTR-A (20-run)", color="#4169E1", linewidth=2.2)
+plt.axhline(df.delay_sec.median(), color="#9370DB", ls="--", label="Median")
+plt.title("Rolling MTTR-A across 200 Runs", color="#000000")
+plt.xlabel("Run #"); plt.ylabel("Seconds")
+plt.legend(); plt.grid(alpha=0.4, color="#9370DB")
+plt.show()
+
+
+sns.countplot(data=df[df.recovery_mode!="no-drift"],
+              x="recovery_mode",
+              palette=["#4169E1","#9370DB","#000000","#808080"])
+plt.title("Frequency of Recovery Modes", color="#000000")
+plt.ylabel("Count")
+plt.grid(axis="y", alpha=0.4, color="#9370DB")
+plt.show()
+
+
+modes = df[df.delay_sec > 0].groupby("recovery_mode")[["T_detect","T_decide","T_execute"]].mean()
+modes.plot(kind="bar", stacked=True, color=["#4169E1","#9370DB","#000000"], figsize=(7,4))
+plt.title("Average Latency Breakdown per Recovery Mode", color="#000000")
+plt.ylabel("Seconds")
+plt.grid(alpha=0.4, color="#9370DB")
+plt.show()
+
+plt.figure(figsize=(8,5))
+sns.violinplot(data=df[df.recovery_mode!="no-drift"],
+               x="recovery_mode", y="delay_sec",
+               palette=["#4169E1","#9370DB","#000000","#808080"])
+plt.title("Distribution of Recovery Delays per Reflex Mode", color="#000000")
+plt.xlabel("Reflex Mode"); plt.ylabel("Recovery Delay (s)")
+plt.grid(alpha=0.4, color="#9370DB")
+plt.show()
+
+plt.figure(figsize=(6,5))
+corr = df[["T_detect","T_decide","T_execute","delay_sec"]].corr()
+sns.heatmap(corr, annot=True, cmap="Purples", cbar=False, square=True)
+plt.title("Latency Component Correlations", color="#000000")
+plt.show()
+
+plt.figure(figsize=(7,4))
+df["recovery_mode"].replace("no-drift", np.nan).ffill().reset_index().plot(style="-", color="#9370DB")
+plt.title("Reflex Mode Utilization Over Time", color="#000000")
+plt.xlabel("Run #"); plt.ylabel("Active Reflex")
+plt.show()
+
+plt.figure(figsize=(6,4))
+sns.boxplot(y=valid, color="#4169E1")
+plt.axhline(np.median(valid), ls="--", color="#9370DB", label="MedTTR-A")
+plt.axhline(np.mean(valid), ls=":", color="#000000", label="MTTR-A")
+plt.title("Mean vs Median Recovery Time (MTTR-A vs MedTTR-A)")
+plt.ylabel("Recovery Time (s)")
+plt.legend()
 plt.show()
 
 modes = df[df.delay_sec > 0].groupby("recovery_mode")[["T_detect","T_decide","T_execute"]].mean()
-modes.plot(kind="bar", stacked=True, color=["skyblue","orange","green"])
-plt.title("Average Latency Breakdown per Recovery Mode")
-plt.ylabel("Seconds")
+modes.loc["Overall"] = modes.mean()
+modes.plot(kind="bar", stacked=True, color=["#4169E1","#9370DB","#000000"])
+plt.ylabel("Average Latency (s)")
+plt.title("Latency Components per Reflex Mode")
 plt.show()
 
+sns.histplot(valid, bins=25, color="#4169E1", kde=True)
+plt.title("Right-Skewed Distribution of Recovery Times")
+plt.xlabel("Recovery Time (s)")
+plt.ylabel("Frequency")
+plt.show()
+
+lam_mu = np.linspace(0, min(1, max(1e-6, mttr_a / max(mtbf, 1e-6))) * 1.2, 100)
+pi_up = 1 / (1 + lam_mu)
+nrr = 1 - lam_mu
+
+plt.figure(figsize=(6.5, 4))
+plt.plot(lam_mu, pi_up, label=r'$\pi_{up}=1/(1+\lambda\mu)$', color="#4169E1", lw=2)
+plt.plot(lam_mu, nrr, label=r'$NRR=1-\lambda\mu$', color="#9370DB", ls="--", lw=2)
+plt.fill_between(lam_mu, nrr, pi_up, color="#9370DB", alpha=0.15)
+plt.scatter([mttr_a / mtbf], [1 / (1 + mttr_a / mtbf)],
+            color="#000000", s=60, zorder=5, label="Observed point")
+plt.title("NRR Lower-Bounds Cognitive Uptime (Theorem 1)")
+plt.xlabel(r'$\lambda\mu = \mathrm{MTTR\text{-}A}/\mathrm{MTBF}$')
+plt.ylabel("Uptime fraction")
+plt.legend()
+plt.grid(alpha=0.4, color="#9370DB")
+plt.show()
