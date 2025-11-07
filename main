@@ -23,7 +23,7 @@ plt.rcParams["xtick.color"] = "#000000"
 plt.rcParams["ytick.color"] = "#000000"
 
 
-os.environ["OPENAI_API_KEY"] = "sk-proj-xxxxx"  # your key 
+os.environ["OPENAI_API_KEY"] = "sk-proj-xxxxx"  # your key
 random.seed(42)
 
 N_RUNS = 200
@@ -100,9 +100,9 @@ def jlog(**kv):
     kv["ts"] = time.time()
     with open(LOGFILE, "a") as f: f.write(json.dumps(kv) + "\n")
 
-# RETRIEVAL & CONFIDENCE 
+# RETRIEVAL & CONFIDENCE
 def local_search(query: str, k: int = 3):
-    time.sleep(0.6 + random.random()*0.4) 
+    time.sleep(0.6 + random.random()*0.4)
     q = query.lower().split()
     bigrams = set(zip(q, q[1:])) if len(q) > 1 else set()
     scored = []
@@ -182,7 +182,7 @@ def recovery_node(state):
          T_execute=state["T_execute"])
     return state
 
-# GRAPH BUILD 
+# GRAPH BUILD
 graph = StateGraph(dict)
 graph.add_node("reasoning", reasoning_node)
 graph.add_node("check_drift", check_drift_node)
@@ -193,7 +193,7 @@ graph.add_edge("check_drift", "recovery")
 graph.add_edge("recovery", END)
 app = graph.compile()
 
-# RUN EXPERIMENT 
+# RUN EXPERIMENT
 records = []
 for i in range(N_RUNS):
     init = {"run_id": i, "query": random.choice(QUERY_POOL)}
