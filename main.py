@@ -1,10 +1,6 @@
-!pip install -U "langchain>=0.1.17" "langchain-community>=0.1.17" \
-               "langchain-core>=0.3.6" "langgraph>=0.0.52" \
-               "langchain-openai>=0.1.7" openai tiktoken \
-               pandas numpy matplotlib seaborn -q
-
 import os, time, random, json, pathlib
 import numpy as np, pandas as pd, matplotlib.pyplot as plt, seaborn as sns
+
 from langgraph.graph import StateGraph, START, END
 from langchain_community.chat_models import ChatOpenAI
 from langchain_core.messages import HumanMessage
@@ -22,12 +18,11 @@ plt.rcParams["axes.labelcolor"] = "#000000"
 plt.rcParams["xtick.color"] = "#000000"
 plt.rcParams["ytick.color"] = "#000000"
 
-
-os.environ["OPENAI_API_KEY"] = "sk-proj-xxxxx"  # your key
 random.seed(42)
 
+# ===================== EXPERIMENT SETTINGS =====================
 N_RUNS = 200
-DRIFT_CONF_THRESHOLD = 0.6    # drift sensitivity
+DRIFT_CONF_THRESHOLD = 0.6    # drift sensitivity; 
 REFLEX_WEIGHTS = [
     ("auto-replan", 0.45),
     ("rollback", 0.25),
@@ -35,51 +30,7 @@ REFLEX_WEIGHTS = [
     ("human-approve", 0.10)
 ]
 
-CORPUS = [
- ("langgraph","LangGraph enables stateful multi-agent coordination via graph execution, shared state, and deterministic edges."),
- ("autogen","AutoGen supports multi-agent conversations, tool calls, and role hand-offs using message loops."),
- ("crew","CrewAI organizes agents with roles, tasks, and delegation for collaborative problem solving."),
- ("llamaindex","LlamaIndex provides modular retrieval, memory, and routing for LLM applications and agent frameworks."),
- ("openagents","OpenAgents offers an open platform for building agent ecosystems with standardized interfaces."),
- ("guardrails","Guardrails enforce schema, policy, and safety constraints; violations trigger validation or blocklist actions."),
- ("observability","Observability pipelines collect traces, tool outputs, prompts, metrics, and policy decisions for audits."),
- ("rollback","Rollback restores a prior checkpointed state to recover from undesired side-effects or drift."),
- ("sandbox","Sandbox execution isolates risky actions, external APIs, or unknown code before promoting results."),
- ("audit","Audit snapshots capture prompts, tools, decisions, and outputs for forensic analysis and compliance."),
- ("policy","A meta-monitor maps triggers to reflex actions with thresholds, SLAs, and approval requirements."),
- ("mttra","MTTR-A measures recovery latency from fault detection to restored stability in agent workflows."),
- ("mtbf","MTBF is the mean time between cognitive faults or drift events in a running agentic system."),
- ("nrr","NRR = 1 − MTTR-A/MTBF provides a dimensionless reliability score comparing recovery to fault rate."),
- ("drift","Reasoning drift includes plan divergence, wrong context, stale memory, unsafe tool calls, or low confidence."),
- ("rate-limit","Tool timeouts and API rate limits cause transient failures; retries or backoff can mitigate."),
- ("consensus","Consensus or voting aggregates peer agent outcomes to handle disagreement and reduce single-agent error."),
- ("memory","Global memory reconciliation prevents corrupted entries from propagating across agents."),
- ("escalation","Human approval gates high-impact actions; escalations add latency but increase assurance."),
- ("tool-retry","Tool-retry repeats an operation with jitter, backoff, or alternative endpoints to handle transient faults."),
- ("auto-replan","Auto-replan regenerates the plan with simplified steps or safer tools under policy constraints."),
- ("safe-mode","Safe-mode narrows the allowed action set and restricts external side-effects until confidence improves."),
- ("fallback","Fallback routes to cached data, read-only operations, or lower-risk strategies."),
- ("snapshot","Snapshots persist intermediate artifacts, enabling reproducible rollbacks and post-mortems."),
- ("sre","SRE practices like SLOs, MTTR, canarying, and incident playbooks inspire agentic reliability."),
- ("telemetry","Cognitive telemetry exports drift signals, confidence, votes, and tool success rates."),
- ("latency","Detection, decision, and execution latencies compose the total recovery window."),
- ("retrieval","Hybrid retrieval blends keyword, vector, and reranking for robust document grounding."),
- ("summarization","Structured summarization extracts claims, sources, and risk flags from retrieved text."),
- ("planning","Planning decomposes tasks into toolable steps with pre-/post-conditions and checks."),
- ("evaluation","Offline evals replay logs, compute MTTR-A, MTBF, NRR, and compare policies."),
- ("governance","Governance codifies risk tiers, approvals, red-teams, and reporting."),
- ("async","Asynchronous agents coordinate via queues; retries and idempotency matter."),
- ("cache","Response caches reduce tool churn and latency; invalidation prevents stale reads."),
- ("routing","Policy-based routing selects agents or tools by risk, cost, and confidence signals."),
- ("traces","Fine-grained traces capture prompts, tools, and decisions for reproducibility."),
- ("configs","Configuration drift is mitigated with templates, tests, and checksums."),
- ("secrets","Secret handling avoids prompt leakage and records masked artifacts."),
- ("backoff","Jittered exponential backoff smooths contention and API rate-limit spikes."),
- ("timeouts","Budgeted timeouts bound worst-case latencies and trigger safe abort."),
- ("playbooks","Incident playbooks standardize reflexes and escalation paths."),
- ("checkpoints","Checkpoints persist minimal state for deterministic, replayable recovery.")
-]
-
+# === Query pool ===
 QUERY_POOL = [
   "LangGraph recovery reflexes", "agent orchestration reliability",
   "rollback sandbox audit snapshots", "tool retries and backoff",
@@ -91,8 +42,81 @@ QUERY_POOL = [
   "retrieval reranking grounding", "planning decomposition tools"
 ]
 
+# ===================== DATASET LOADING =====================
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
+USE_HF = True # set True to use Hugging Face 'ag_news' instead of 20 Newsgroups
 
+def load_corpus_20newsgroups(subset="train", remove=("headers","footers","quotes")):
+    """
+    Returns: texts (list[str]), titles (list[str]) where 'titles' are just category labels for display.
+    """
+    from sklearn.datasets import fetch_20newsgroups
+    data = fetch_20newsgroups(subset=subset, remove=remove)
+    texts = [t for t in data.data]
+    titles = [data.target_names[y] for y in data.target]
+    return texts, titles
+
+def load_corpus_hf_agnews(split="train"):
+    """
+    Returns: texts (list[str]), titles (list[str]) from Hugging Face 'ag_news' (4 news categories).
+    """
+    from datasets import load_dataset
+    ds = load_dataset("ag_news", split=split)
+    texts = [x["text"] for x in ds]
+    titles = [x["label"] for x in ds]  # numeric class IDs (0..3)
+    return texts, titles
+
+print("Loading real dataset...")
+if USE_HF:
+    texts, titles = load_corpus_hf_agnews(split="train")
+    dataset_name = "ag_news (HF)"
+else:
+    texts, titles = load_corpus_20newsgroups(subset="train")
+    dataset_name = "20newsgroups (scikit-learn)"
+
+print(f"Dataset: {dataset_name} | Documents: {len(texts):,}")
+
+# light cleanup to reduce empty docs
+def _normalize(s: str) -> str:
+    return (s or "").replace("\r"," ").replace("\n"," ").strip()
+
+texts = [ _normalize(t) for t in texts ]
+mask = [ (len(t) > 0) for t in texts ]
+texts = [ t for t,m in zip(texts, mask) if m ]
+titles = [ ti for ti,m in zip(titles, mask) if m ]
+
+print(f"After cleanup: {len(texts):,} docs")
+
+# ===================== BUILD TF-IDF RETRIEVER =====================
+# Fit once globally; reuse for local_search()
+tfidf = TfidfVectorizer(max_df=0.9, min_df=2, ngram_range=(1,2))
+X = tfidf.fit_transform(texts)  # shape: [N_docs, vocab]
+
+def local_search(query: str, k: int = 3):
+    """
+    Real retrieval: cosine similarity on TF-IDF between query and corpus.
+    Returns list of top-k document texts.
+    """
+    qv = tfidf.transform([query])
+    sims = cosine_similarity(qv, X)[0]  # vector of length N_docs
+    if np.all(sims == 0):
+        # Fallback: return 3 random docs to avoid degenerate empty results
+        idx = np.random.choice(len(texts), size=min(k, len(texts)), replace=False)
+    else:
+        idx = np.argsort(-sims)[:k]
+    return [texts[i] for i in idx], sims[idx].tolist()
+
+def confidence_from_scores(scores):
+    """
+    Confidence is mean of top-k cosine similarities (already in [0,1]).
+    """
+    if not scores: return 0.0
+    c = float(np.clip(np.mean(scores), 0.0, 1.0))
+    return c
+
+# ===================== TELEMETRY =====================
 LOGDIR = pathlib.Path("telemetry"); LOGDIR.mkdir(exist_ok=True)
 LOGFILE = LOGDIR / f"langgraph_run_{int(time.time())}.jsonl"
 
@@ -100,39 +124,23 @@ def jlog(**kv):
     kv["ts"] = time.time()
     with open(LOGFILE, "a") as f: f.write(json.dumps(kv) + "\n")
 
-# RETRIEVAL & CONFIDENCE
-def local_search(query: str, k: int = 3):
-    time.sleep(0.6 + random.random()*0.4)
-    q = query.lower().split()
-    bigrams = set(zip(q, q[1:])) if len(q) > 1 else set()
-    scored = []
-    for _, txt in CORPUS:
-        tl = txt.lower().split()
-        score = sum(w in tl for w in q)
-        score += sum((a in tl and b in tl) for (a,b) in bigrams)
-        scored.append((txt, score, len(txt)))
-    scored.sort(key=lambda x: (x[1], x[2]), reverse=True)
-    return [s[0] for s in scored[:k]]
-
-def confidence(snippets):
-    L = sum(len(s) for s in snippets)
-    return max(0.0, min(1.0, (L / 600)))
-
-
-# LANGGRAPH NODES =====================================
-
+# ===================== LANGGRAPH NODES =====================
 def reasoning_node(state):
     state["t_reason_start"] = time.time()
     query = state["query"]
-    snippets = local_search(query)
+    snippets, scores = local_search(query, k=3)
     state["snippets"] = snippets
-    state["confidence"] = confidence(snippets)
+    state["retrieval_scores"] = scores
+    state["confidence"] = confidence_from_scores(scores)
     state["t_reason_end"] = time.time()
-    jlog(run=state["run_id"], event="reasoning_done", conf=state["confidence"])
+    jlog(run=state["run_id"], event="reasoning_done",
+         conf=state["confidence"], dataset=dataset_name,
+         top_scores=scores)
     return state
 
 def check_drift_node(state):
     state["t_drift_check"] = time.time()
+    # Drift if confidence too low OR random rare false-negative/edge case
     state["is_drift"] = (state["confidence"] < DRIFT_CONF_THRESHOLD) or (random.random() < 0.05)
     jlog(run=state["run_id"],
          event="fault_detected" if state["is_drift"] else "no_fault",
@@ -146,30 +154,30 @@ def recovery_node(state):
         jlog(run=state["run_id"], event="recovered", mode="no-drift")
         return state
 
-    # ---- Decision latency ----
+    # Decision latency
     t_decide_start = time.time()
     modes, weights = zip(*REFLEX_WEIGHTS)
     mode = random.choices(modes, weights=weights, k=1)[0]
     time.sleep(random.uniform(0.2, 0.6))
     t_decide_end = time.time()
 
-    # ---- Execute reflex ----
+    # Execute reflex
     t_exec_start = time.time()
     if mode == "tool-retry":
         time.sleep(random.uniform(3.0, 5.0))
-        _ = local_search(state["query"] + " recovery")
+        _snip, _ = local_search(state["query"] + " recovery", k=3)
     elif mode == "auto-replan":
         time.sleep(random.uniform(4.0, 6.5))
-        _ = local_search(state["query"] + " orchestration")
+        _snip, _ = local_search(state["query"] + " orchestration", k=3)
     elif mode == "rollback":
         time.sleep(random.uniform(5.5, 7.0))
         state["snippets"] = []
-        _ = local_search(state["query"])
+        _snip, _ = local_search(state["query"], k=3)
     elif mode == "human-approve":
         time.sleep(random.uniform(10.0, 12.5))
     t_exec_end = time.time()
 
-    # ---- Record metrics ----
+    # Record metrics
     state["recovery_mode"] = mode
     state["T_detect"] = state["t_drift_check"] - state["t_reason_end"]
     state["T_decide"] = t_decide_end - t_decide_start
@@ -182,7 +190,7 @@ def recovery_node(state):
          T_execute=state["T_execute"])
     return state
 
-# GRAPH BUILD
+# ===================== GRAPH BUILD =====================
 graph = StateGraph(dict)
 graph.add_node("reasoning", reasoning_node)
 graph.add_node("check_drift", check_drift_node)
@@ -193,8 +201,9 @@ graph.add_edge("check_drift", "recovery")
 graph.add_edge("recovery", END)
 app = graph.compile()
 
-# RUN EXPERIMENT
+# ===================== RUN EXPERIMENT =====================
 records = []
+print("Running experiment...")
 for i in range(N_RUNS):
     init = {"run_id": i, "query": random.choice(QUERY_POOL)}
     final = app.invoke(init)
@@ -206,7 +215,8 @@ for i in range(N_RUNS):
         "T_detect": final.get("T_detect", 0),
         "T_decide": final.get("T_decide", 0),
         "T_execute": final.get("T_execute", 0),
-        "t_recovered": final.get("t_recovery_start", 0)
+        "t_recovered": final.get("t_recovery_start", 0),
+        "conf": final.get("confidence", np.nan)
     })
     if i % 20 == 0:
         print(f" Completed {i}/{N_RUNS} runs...")
@@ -214,21 +224,32 @@ for i in range(N_RUNS):
 df = pd.DataFrame(records)
 print("\n Finished all runs.")
 
-# METRICS
+# ===================== METRICS =====================
 valid = df[df.delay_sec > 0]["delay_sec"]
 if len(valid) == 0:
-    print("No drift/recovery events detected —> increase DRIFT_CONF_THRESHOLD.")
+    print("No drift/recovery events detected —> try lowering DRIFT_CONF_THRESHOLD to 0.45–0.55.")
 else:
     mttr_a = valid.median(); mttr_std = valid.std()
     p90 = np.percentile(valid, 90)
     drift_rate = df.is_drift.mean()
-    total_time = df["t_recovered"].max() - df["t_recovered"].min()
-    num_drifts = df["is_drift"].sum()
-    mtbf = total_time / num_drifts if num_drifts > 0 else float("inf")
-    mtbf_std = np.std(np.diff(df.sort_values("t_recovered")["t_recovered"].values)) if num_drifts > 1 else 0
-    nrr = 1 - (mttr_a / mtbf)
 
-    print(f"\nMedian MTTR-A: {mttr_a:.2f} ± {mttr_std:.2f}s | P90: {p90:.2f}s | Drift rate: {drift_rate:.1%}")
+    # MTBF based on recovery timestamps of drifted runs (rough heuristic)
+    recov_times = df.loc[df.is_drift, "t_recovered"].sort_values().values
+    if len(recov_times) >= 2:
+        mtbf_intervals = np.diff(recov_times)
+        mtbf = float(np.mean(mtbf_intervals))
+        mtbf_std = float(np.std(mtbf_intervals))
+    else:
+        # fall back to total window / num_drifts if too few points
+        total_time = df["t_recovered"].max() - df["t_recovered"].min()
+        num_drifts = int(df["is_drift"].sum())
+        mtbf = total_time / num_drifts if num_drifts > 0 else float("inf")
+        mtbf_std = 0.0
+
+    nrr = 1 - (mttr_a / max(mtbf, 1e-6))
+
+    print(f"\nDataset: {dataset_name}")
+    print(f"Median MTTR-A: {mttr_a:.2f} ± {mttr_std:.2f}s | P90: {p90:.2f}s | Drift rate: {drift_rate:.1%}")
     print(f"MTBF ≈ {mtbf:.2f} ± {mtbf_std:.2f}s | NRR ≈ {nrr:.3f}")
 
     summary = (
@@ -241,109 +262,3 @@ else:
         .reset_index()
     )
     print("\nSummary per recovery mode:\n", summary.round(2))
-
-# OPTIONAL PLOTS
-plt.figure(figsize=(7,4))
-sns.histplot(valid, bins=25, color="#4169E1", kde=True)
-plt.title("MTTR-A Distribution", color="#000000")
-plt.xlabel("Recovery Time (s)"); plt.ylabel("Runs")
-plt.grid(alpha=0.4, color="#9370DB")
-plt.show()
-
-
-plt.figure(figsize=(7,4))
-sns.boxplot(data=df[df.recovery_mode != "no-drift"],
-            x="recovery_mode", y="delay_sec",
-            palette=["#4169E1","#9370DB","#000000","#808080"])
-plt.title("MTTR-A by Recovery Mode", color="#000000")
-plt.xlabel("Recovery Mode"); plt.ylabel("Delay (s)")
-plt.grid(axis="y", alpha=0.4, color="#9370DB")
-plt.show()
-
-# Compute rolling 20-run average (for stability plot)
-df["window_avg"] = df["delay_sec"].rolling(20, min_periods=1).mean()
-
-plt.figure(figsize=(7,4))
-plt.plot(df["window_avg"], label="Rolling MTTR-A (20-run)", color="#4169E1", linewidth=2.2)
-plt.axhline(df.delay_sec.median(), color="#9370DB", ls="--", label="Median")
-plt.title("Rolling MTTR-A across 200 Runs", color="#000000")
-plt.xlabel("Run #"); plt.ylabel("Seconds")
-plt.legend(); plt.grid(alpha=0.4, color="#9370DB")
-plt.show()
-
-
-sns.countplot(data=df[df.recovery_mode!="no-drift"],
-              x="recovery_mode",
-              palette=["#4169E1","#9370DB","#000000","#808080"])
-plt.title("Frequency of Recovery Modes", color="#000000")
-plt.ylabel("Count")
-plt.grid(axis="y", alpha=0.4, color="#9370DB")
-plt.show()
-
-
-modes = df[df.delay_sec > 0].groupby("recovery_mode")[["T_detect","T_decide","T_execute"]].mean()
-modes.plot(kind="bar", stacked=True, color=["#4169E1","#9370DB","#000000"], figsize=(7,4))
-plt.title("Average Latency Breakdown per Recovery Mode", color="#000000")
-plt.ylabel("Seconds")
-plt.grid(alpha=0.4, color="#9370DB")
-plt.show()
-
-plt.figure(figsize=(8,5))
-sns.violinplot(data=df[df.recovery_mode!="no-drift"],
-               x="recovery_mode", y="delay_sec",
-               palette=["#4169E1","#9370DB","#000000","#808080"])
-plt.title("Distribution of Recovery Delays per Reflex Mode", color="#000000")
-plt.xlabel("Reflex Mode"); plt.ylabel("Recovery Delay (s)")
-plt.grid(alpha=0.4, color="#9370DB")
-plt.show()
-
-plt.figure(figsize=(6,5))
-corr = df[["T_detect","T_decide","T_execute","delay_sec"]].corr()
-sns.heatmap(corr, annot=True, cmap="Purples", cbar=False, square=True)
-plt.title("Latency Component Correlations", color="#000000")
-plt.show()
-
-plt.figure(figsize=(7,4))
-df["recovery_mode"].replace("no-drift", np.nan).ffill().reset_index().plot(style="-", color="#9370DB")
-plt.title("Reflex Mode Utilization Over Time", color="#000000")
-plt.xlabel("Run #"); plt.ylabel("Active Reflex")
-plt.show()
-
-plt.figure(figsize=(6,4))
-sns.boxplot(y=valid, color="#4169E1")
-plt.axhline(np.median(valid), ls="--", color="#9370DB", label="MedTTR-A")
-plt.axhline(np.mean(valid), ls=":", color="#000000", label="MTTR-A")
-plt.title("Mean vs Median Recovery Time (MTTR-A vs MedTTR-A)")
-plt.ylabel("Recovery Time (s)")
-plt.legend()
-plt.show()
-
-modes = df[df.delay_sec > 0].groupby("recovery_mode")[["T_detect","T_decide","T_execute"]].mean()
-modes.loc["Overall"] = modes.mean()
-modes.plot(kind="bar", stacked=True, color=["#4169E1","#9370DB","#000000"])
-plt.ylabel("Average Latency (s)")
-plt.title("Latency Components per Reflex Mode")
-plt.show()
-
-sns.histplot(valid, bins=25, color="#4169E1", kde=True)
-plt.title("Right-Skewed Distribution of Recovery Times")
-plt.xlabel("Recovery Time (s)")
-plt.ylabel("Frequency")
-plt.show()
-
-lam_mu = np.linspace(0, min(1, max(1e-6, mttr_a / max(mtbf, 1e-6))) * 1.2, 100)
-pi_up = 1 / (1 + lam_mu)
-nrr = 1 - lam_mu
-
-plt.figure(figsize=(6.5, 4))
-plt.plot(lam_mu, pi_up, label=r'$\pi_{up}=1/(1+\lambda\mu)$', color="#4169E1", lw=2)
-plt.plot(lam_mu, nrr, label=r'$NRR=1-\lambda\mu$', color="#9370DB", ls="--", lw=2)
-plt.fill_between(lam_mu, nrr, pi_up, color="#9370DB", alpha=0.15)
-plt.scatter([mttr_a / mtbf], [1 / (1 + mttr_a / mtbf)],
-            color="#000000", s=60, zorder=5, label="Observed point")
-plt.title("NRR Lower-Bounds Cognitive Uptime (Theorem 1)")
-plt.xlabel(r'$\lambda\mu = \mathrm{MTTR\text{-}A}/\mathrm{MTBF}$')
-plt.ylabel("Uptime fraction")
-plt.legend()
-plt.grid(alpha=0.4, color="#9370DB")
-plt.show()
